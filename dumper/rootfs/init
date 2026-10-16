@@ -1,0 +1,37 @@
+#!/bin/busybox sh
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t configfs configfs /sys/kernel/config 2>/dev/null
+
+# Clear the bootloader control block (misc) first, so the next reboot goes to Android again
+for M in /dev/block/by-name/misc /dev/mmcblk2p4; do
+  [ -e "$M" ] && dd if=/dev/zero of="$M" bs=512 count=1 2>/dev/null && break
+done
+
+# Safety net 1: reboot after 45 minutes no matter what (misc is clear, so this boots Android)
+( sleep 2700; echo b > /proc/sysrq-trigger; reboot -f ) &
+
+# Wait for the eMMC
+for i in $(seq 1 15); do { [ -e /dev/block/mmcblk2 ] || [ -e /dev/mmcblk2 ]; } && break; sleep 1; done
+EMMC=/dev/mmcblk2; [ -e /dev/block/mmcblk2 ] && EMMC=/dev/block/mmcblk2
+
+# Export the whole eMMC as a USB mass storage device
+cd /sys/kernel/config/usb_gadget
+mkdir -p g1; cd g1
+echo 0x2207 > idVendor; echo 0x0019 > idProduct
+mkdir -p strings/0x409; echo WALLDUMP > strings/0x409/serialnumber
+echo Rockchip > strings/0x409/manufacturer; echo eMMC-Dump > strings/0x409/product
+mkdir -p functions/mass_storage.0/lun.0
+echo 0 > functions/mass_storage.0/lun.0/removable
+echo "$EMMC" > functions/mass_storage.0/lun.0/file
+mkdir -p configs/c.1/strings/0x409; echo dump > configs/c.1/strings/0x409/configuration
+ln -s functions/mass_storage.0 configs/c.1/ 2>/dev/null
+UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+echo "$UDC" > UDC 2>/dev/null; RC=$?
+
+# Safety net 2: gadget did not come up -> reboot right away
+if [ -z "$UDC" ] || [ "$RC" != 0 ]; then sleep 3; echo b > /proc/sysrq-trigger; reboot -f; fi
+
+while true; do sleep 5; done

@@ -1,0 +1,7 @@
+build/
+magisk-patch/
+backup/
+*.img
+*.apk
+*.zip
+device.config
